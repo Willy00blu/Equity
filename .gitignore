@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+*.dylib
+*.so
+.DS_Store
+.claude/
