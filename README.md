@@ -1,4 +1,4 @@
-# Poker Suite Pro
+# Equity
 
 A desktop poker analysis tool for 6-max cash games. Built with Python and Tkinter, with a Monte Carlo equity engine written in C.
 
