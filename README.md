@@ -1,95 +1,32 @@
 # Equity
 
-A desktop poker analysis tool for 6-max cash games. Built with Python and Tkinter, with a Monte Carlo equity engine written in C.
+A Monte Carlo equity engine: it estimates, by simulation, how often a poker hand wins against a range of hands. The engine is written in C for speed; a small Python and Tkinter interface sends it the hand, the range and the board, and draws the results.
+
+The point of the project is the probability model: dealing the missing cards at random thousands of times, comparing the hands, and weighting the results by how often each part of the range can actually occur.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue) ![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-## Features
+## Requirements and setup
 
-- **Range Manager** — pre-flop open-raise decisions by position (EP, MP, CO, BTN, SB)
-- **Risk Evaluator** — pot odds calculator with the outs rule (×2 / ×4)
-- **Equity Calculator** — Monte Carlo simulation against a villain range, with equity chart and hand distribution table
-- **Player Analysis** — opponent profiling from HUD stats (VPIP, PFR, 3-Bet%)
+- Python 3.8+ and `matplotlib` (`pip install -r requirements.txt`)
+- macOS: the Python side loads the engine as `logic/equity_engine/poker.dylib`
 
----
-
-## Requirements
-
-- Python 3.8+
-- macOS (arm64) — the included `poker.dylib` is compiled for Apple Silicon
+The compiled library is not in the repository: build it once before the first run.
 
 ```bash
-pip install matplotlib
-```
-
-To recompile the C engine for a different architecture:
-```bash
-clang -arch arm64 -shared -fPIC -o logic/equity_engine/poker.dylib logic/equity_engine/poker.c
-```
-
----
-
-## Usage
-
-```bash
+clang -O2 -shared -fPIC -o logic/equity_engine/poker.dylib logic/equity_engine/poker.c
 python3 main.py
 ```
 
 ---
 
-## Project Structure
+## How the engine works
 
-```
-poker/
-├── main.py
-├── gui/
-│   ├── range_selector.py          # Interactive 13x13 hand grid
-│   └── tabs/
-│       ├── entry_strategy_tab.py
-│       ├── odds_tab.py
-│       ├── sim_tab.py
-│       └── analysis_tab.py
-└── logic/
-    ├── entry_strategy/
-    │   ├── charts.py              # Pre-flop range database
-    │   └── decision_maker.py
-    ├── equity_engine/
-    │   ├── poker.c                # Monte Carlo engine
-    │   ├── poker.dylib            # Compiled C library (arm64)
-    │   ├── range_parser.py        # Range notation parser
-    │   └── simulation_core.py     # ctypes bridge
-    ├── investment_calc/
-    │   └── risk_evaluator.py
-    └── player_profiler.py
-```
+It runs a full Monte Carlo simulation of Hero's hand against a villain range, accounting for blockers, board texture, and combo frequency.
 
----
-
-## How It Works
-
-### Range Manager
-
-Looks up the input hand against a database of GTO-approximate open-raise ranges for each position. Hands are classified as always open, conditional (e.g. open only if BB is weak), or fold.
-
-### Risk Evaluator
-
-Calculates pot odds and compares them against approximated equity via the outs rule:
-
-```
-required_equity = bet / (pot + 2 × bet)
-actual_equity   = outs × 2   (one card to come)
-actual_equity   = outs × 4   (all-in on flop, two cards to come)
-```
-
-A call is profitable when `actual_equity >= required_equity`. A margin within 5% is flagged as borderline (implied odds territory).
-
-### Equity Calculator
-
-The most complex module. It runs a full Monte Carlo simulation of Hero's hand against a villain range, accounting for blockers, board texture, and combo frequency.
-
-#### Range parsing
+### Range parsing
 
 The villain range is expressed in standard poker notation and supports:
 
@@ -111,7 +48,7 @@ Each hand type generates a fixed number of combos:
 - Suited: **4** combos — one per suit
 - Offsuit: **12** combos — 4 suits × 3 different suits for the second card
 
-#### Monte Carlo simulation
+### Monte Carlo simulation
 
 For each combo group the C engine runs 20,000 simulations:
 
@@ -140,7 +77,7 @@ This means two hands can be compared with a single integer comparison — no bra
 
 The engine also tracks how often Hero makes each hand type across simulations, which feeds the hand distribution table in the UI.
 
-#### Weighted equity
+### Weighted equity
 
 Running one simulation per combo group (using the first combo as representative) is fast but naive — different combo groups appear with different frequencies. QQ has 6 combos, AKs has 4. If you average their equities without accounting for this, the result is wrong.
 
@@ -166,7 +103,7 @@ final = (46×6 + 30×3 + 12×6) / (6+3+6) = (276+90+72) / 15 ≈ 29.2%
 
 A simple average of 46, 30, 12 would give 29.3% — close here, but the gap grows significantly with unbalanced ranges.
 
-#### Output
+### Output
 
 After all simulations complete, the worker thread sends the results back to the main thread via `root.after()` (thread-safe Tkinter callback) and updates three things simultaneously:
 
@@ -174,14 +111,26 @@ After all simulations complete, the worker thread sends the results back to the 
 - **Hand distribution table**: frequency of each hand type Hero achieves, sorted descending, also weighted by combo count
 - **Range grid heatmap**: the 13×13 interactive grid gets colored using a red → yellow → green gradient based on the equity of each cell
 
-### Player Analysis
+## Also in the app
 
-Derives two metrics from HUD stats:
+The interface has three smaller tabs around the engine, written as exercises: a pre-flop chart by position, a pot-odds check with the outs rule (×2 / ×4), and a classifier of playing styles from three summary statistics.
 
-- **Gap** (`VPIP − PFR`): high gap = player calls a lot instead of raising (passive)
-- **Aggro Ratio** (`PFR / VPIP`): close to 1 = raises almost everything they play
+---
 
-These feed a decision tree that classifies players into archetypes: NIT, Weak Tight, TAG variants, LAG, Bad Reg, Whale/Station, Maniac, and Loose Passive — each with specific counter-strategies.
+## Project structure
+
+```
+├── main.py
+├── gui/
+│   ├── range_selector.py          # the 13×13 hand grid
+│   └── tabs/                      # the engine's tab (sim_tab.py) and the three smaller ones
+└── logic/
+    ├── equity_engine/
+    │   ├── poker.c                # the Monte Carlo engine and the hand evaluator
+    │   ├── range_parser.py        # range notation → concrete card pairs, without blocked combos
+    │   └── simulation_core.py     # the ctypes bridge to poker.dylib
+    ├── entry_strategy/, investment_calc/, player_profiler.py   # the smaller tabs
+```
 
 ---
 
